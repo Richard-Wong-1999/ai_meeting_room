@@ -1,21 +1,18 @@
 Screen {
     layout: grid;
-    grid-size: 3 3;
+    grid-size: 2 1;
     grid-columns: 2fr 1fr;
-    grid-rows: 1fr auto auto;
 }
 
 #chat-panel {
-    column-span: 1;
-    row-span: 1;
+    height: 1fr;
     border: solid $accent;
     border-title-color: $text;
     padding: 0 1;
 }
 
 #notes-panel {
-    column-span: 1;
-    row-span: 1;
+    height: 1fr;
     border: solid $secondary;
     border-title-color: $text;
     padding: 0 1;
@@ -24,7 +21,6 @@ Screen {
 #input-box {
     column-span: 2;
     dock: bottom;
-    margin: 0 0;
 }
 
 #status-bar {
