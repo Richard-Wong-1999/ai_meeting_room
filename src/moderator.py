@@ -32,11 +32,19 @@ class Moderator:
         self._poe = poe
         self._notes = NotesManager(poe)
         self._shutdown = False
+        self._labels: dict[str, str] = {
+            p.name: f"{p.name}（{p.role}, {p.model}）"
+            for p in config.participants
+        }
 
         self.on_chat_message = on_chat_message
         self.on_chat_chunk = on_chat_chunk
         self.on_note = on_note
         self.on_status = on_status
+
+    def _label(self, name: str) -> str:
+        """Return 'Name（Role, Model）' display string."""
+        return self._labels.get(name, name)
 
     def request_shutdown(self) -> None:
         self._shutdown = True
@@ -63,7 +71,7 @@ class Moderator:
         for r in results:
             tag = "YES" if r.wants_to_speak else "NO"
             await self.on_note(
-                f"[{r.participant_name}] {tag}: {r.summary}"
+                f"[{self._label(r.participant_name)}] {tag}: {r.summary}"
             )
 
         speakers = sorted(
@@ -72,10 +80,17 @@ class Moderator:
         )
 
         if not speakers:
-            await self.on_note("No AI wants to speak. Generating summary…")
+            await self.on_note("沒有 AI 想發言。正在產生摘要…")
             await self._generate_round_summary()
             await self.on_status(ModeratorState.WAITING_FOR_USER, "")
             return
+
+        # Announce speaking order in notes panel
+        order = "\n".join(
+            f"  {i+1}. {self._label(s.participant_name)}"
+            for i, s in enumerate(speakers)
+        )
+        await self.on_note(f"發言順序：\n{order}")
 
         # --- Phase 2: speaking loop ---
         rounds = 0
@@ -100,14 +115,14 @@ class Moderator:
             except asyncio.TimeoutError:
                 full_text += "\n(response timed out)"
                 await self.on_note(
-                    f"[{current.participant_name}] response timed out"
+                    f"[{self._label(current.participant_name)}] 回應逾時"
                 )
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
                 full_text += f"\n(error: {exc!s})"
                 await self.on_note(
-                    f"[{current.participant_name}] error: {exc!s}"
+                    f"[{self._label(current.participant_name)}] 錯誤: {exc!s}"
                 )
 
             # Finalize message
@@ -145,7 +160,7 @@ class Moderator:
                 for r in recheck_results:
                     tag = "YES" if r.wants_to_speak else "NO"
                     await self.on_note(
-                        f"  ↳ [{r.participant_name}] {tag}: {r.summary}"
+                        f"  ↳ [{self._label(r.participant_name)}] {tag}: {r.summary}"
                     )
 
                 speakers = sorted(
@@ -180,7 +195,7 @@ class Moderator:
         return list(await asyncio.gather(*tasks, return_exceptions=False))
 
     async def _generate_round_summary(self) -> None:
-        await self.on_status(ModeratorState.GENERATING_NOTES, "Generating summary…")
+        await self.on_status(ModeratorState.GENERATING_NOTES, "正在產生摘要…")
         summary = await self._notes.generate_summary()
-        await self.on_note(f"\n--- Round Summary ---\n{summary}\n")
+        await self.on_note(f"\n--- 本輪摘要 ---\n{summary}\n")
         self._notes.clear_round()

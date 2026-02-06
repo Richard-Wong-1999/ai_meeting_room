@@ -4,9 +4,8 @@ import asyncio
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.widgets import Input, RichLog, Static
+from textual.widgets import Input, Static, TextArea
 
-from .config import load_config, require_api_key
 from .models import AppConfig, ModeratorState
 from .moderator import Moderator
 from .poe_client import PoeClient
@@ -29,10 +28,27 @@ class MeetingApp(App):
         self._moderator: Moderator | None = None
         self._streaming_buffer: str = ""
         self._streaming_name: str | None = None
+        # Build name→label lookup for display
+        self._labels: dict[str, str] = {
+            p.name: f"{p.name}（{p.role}, {p.model}）"
+            for p in config.participants
+        }
 
     def compose(self) -> ComposeResult:
-        yield RichLog(id="chat-panel", wrap=True, markup=True)
-        yield RichLog(id="notes-panel", wrap=True, markup=True)
+        yield TextArea(
+            "",
+            id="chat-panel",
+            read_only=True,
+            show_line_numbers=False,
+            soft_wrap=True,
+        )
+        yield TextArea(
+            "會議記錄將顯示在此…",
+            id="notes-panel",
+            read_only=True,
+            show_line_numbers=False,
+            soft_wrap=True,
+        )
         yield Static("Ready — type a message to begin", id="status-bar")
         yield Input(
             placeholder="Type your message and press Enter…",
@@ -40,8 +56,8 @@ class MeetingApp(App):
         )
 
     def on_mount(self) -> None:
-        chat = self.query_one("#chat-panel", RichLog)
-        notes = self.query_one("#notes-panel", RichLog)
+        chat = self.query_one("#chat-panel", TextArea)
+        notes = self.query_one("#notes-panel", TextArea)
         chat.border_title = f"Chat — {self._config.meeting.title}"
         notes.border_title = "Meeting Notes"
 
@@ -56,10 +72,9 @@ class MeetingApp(App):
         )
 
         participants = ", ".join(
-            f"{p.name} ({p.role})" for p in self._config.participants
+            f"{p.name}（{p.role}, {p.model}）" for p in self._config.participants
         )
-        chat.write(f"[bold]Participants:[/bold] {participants}")
-        notes.write("[dim]Notes will appear here…[/dim]")
+        chat.text = f"參與者：{participants}\n"
 
     async def on_input_submitted(self, event: Input.Submitted) -> None:
         text = event.value.strip()
@@ -70,8 +85,8 @@ class MeetingApp(App):
         input_box.value = ""
         input_box.disabled = True
 
-        chat = self.query_one("#chat-panel", RichLog)
-        chat.write(f"[bold cyan]You:[/bold cyan] {text}")
+        chat = self.query_one("#chat-panel", TextArea)
+        chat.text += f"\n【使用者】 {text}\n"
 
         self.run_worker(
             self._run_turn(text),
@@ -86,8 +101,8 @@ class MeetingApp(App):
         except asyncio.CancelledError:
             pass
         except Exception as exc:
-            notes = self.query_one("#notes-panel", RichLog)
-            notes.write(f"[bold red]Error:[/bold red] {exc!s}")
+            notes = self.query_one("#notes-panel", TextArea)
+            notes.text += f"\nERROR: {exc!s}"
         finally:
             input_box = self.query_one("#input-box", Input)
             input_box.disabled = False
@@ -97,8 +112,12 @@ class MeetingApp(App):
 
     async def _on_chat_message(self, author: str, text: str) -> None:
         """Called when an AI finishes speaking — write the complete message."""
-        chat = self.query_one("#chat-panel", RichLog)
-        chat.write(f"[bold green]{author}:[/bold green] {text}")
+        chat = self.query_one("#chat-panel", TextArea)
+        if author == "主持人":
+            chat.text += f"\n【主持人】 {text}\n"
+        else:
+            label = self._labels.get(author, author)
+            chat.text += f"\n【{label}】\n{text}\n"
         self._streaming_name = None
         self._streaming_buffer = ""
 
@@ -109,14 +128,17 @@ class MeetingApp(App):
             self._streaming_name = author
             self._streaming_buffer = ""
         self._streaming_buffer += chunk
-        # Show streaming progress in the status bar
+        label = self._labels.get(author, author)
         preview = self._streaming_buffer[:80].replace("\n", " ")
         bar = self.query_one("#status-bar", Static)
-        bar.update(f"{author} speaking: {preview}…")
+        bar.update(f"{label} speaking: {preview}…")
 
     async def _on_note(self, text: str) -> None:
-        notes = self.query_one("#notes-panel", RichLog)
-        notes.write(text)
+        notes = self.query_one("#notes-panel", TextArea)
+        if notes.text == "會議記錄將顯示在此…":
+            notes.text = text
+        else:
+            notes.text += "\n" + text
 
     async def _on_status(self, state: ModeratorState, detail: str) -> None:
         bar = self.query_one("#status-bar", Static)
@@ -134,10 +156,3 @@ class MeetingApp(App):
         if self._poe:
             await self._poe.close()
         self.exit()
-
-
-def run_app() -> None:
-    config = load_config()
-    api_key = require_api_key()
-    app = MeetingApp(config, api_key)
-    app.run()

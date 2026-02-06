@@ -6,16 +6,16 @@ Screen {
 
 #chat-panel {
     height: 1fr;
+    width: 100%;
     border: solid $accent;
     border-title-color: $text;
-    padding: 0 1;
 }
 
 #notes-panel {
     height: 1fr;
+    width: 100%;
     border: solid $secondary;
     border-title-color: $text;
-    padding: 0 1;
 }
 
 #input-box {

@@ -30,7 +30,7 @@ class NotesManager:
 
     async def generate_summary(self) -> str:
         if not self._round_messages:
-            return "(no messages this round)"
+            return "（本輪無訊息）"
         block = self._build_conversation_block()
         prompt = build_notes_prompt(block)
         return await self._poe.get_notes_summary(prompt)
