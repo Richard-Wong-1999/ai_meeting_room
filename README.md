@@ -36,7 +36,7 @@ cd C:\Users\你的使用者名稱\Desktop
 然後下載程式碼：
 
 ```
-git clone https://github.com/<your-username>/ai_meeting_room.git
+git clone https://github.com/Richard-Wong-1999/ai_meeting_room.git
 cd ai_meeting_room
 ```
 
