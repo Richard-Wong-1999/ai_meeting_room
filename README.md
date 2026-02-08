@@ -31,6 +31,8 @@ python --version
 cd C:\Users\你的使用者名稱\Desktop
 ```
 
+將「你的使用者名稱」替換為你的使用者名稱。
+
 然後下載程式碼：
 
 ```
