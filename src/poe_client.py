@@ -73,16 +73,39 @@ class ParticipantSession:
         prompt = build_recheck_prompt(self.name, speaker, message)
         return await self._do_relevance_call(prompt)
 
+    async def _make_completion_call(
+        self, messages: list[dict[str, str]], timeout: int, **kwargs
+    ):
+        """通用的 API 調用包裝器，處理超時和錯誤。
+
+        Args:
+            messages: 消息列表
+            timeout: 超時秒數
+            **kwargs: 傳遞給 API 的額外參數
+
+        Returns:
+            API 響應對象
+
+        Raises:
+            asyncio.TimeoutError: 如果調用超時
+            Exception: 其他 API 錯誤
+        """
+        return await asyncio.wait_for(
+            self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                **kwargs,
+            ),
+            timeout=timeout,
+        )
+
     async def _do_relevance_call(self, prompt: str) -> RelevanceResult:
         temp_messages = self.messages + [{"role": "user", "content": prompt}]
         try:
-            resp = await asyncio.wait_for(
-                self.client.chat.completions.create(
-                    model=self.model,
-                    messages=temp_messages,
-                    max_tokens=150,
-                ),
+            resp = await self._make_completion_call(
+                messages=temp_messages,
                 timeout=self.relevance_timeout,
+                max_tokens=150,
             )
             content = resp.choices[0].message.content or ""
             return self._parse_relevance(content)
@@ -90,14 +113,14 @@ class ParticipantSession:
             return RelevanceResult(
                 participant_name=self.name,
                 wants_to_speak=False,
-                summary="(timed out on relevance check)",
+                summary="（相關性檢查逾時）",
                 priority=self.priority,
             )
         except Exception as exc:
             return RelevanceResult(
                 participant_name=self.name,
                 wants_to_speak=False,
-                summary=f"(error: {exc!s})",
+                summary=f"（錯誤：{exc!s}）",
                 priority=self.priority,
             )
 
@@ -120,13 +143,10 @@ class ParticipantSession:
     async def get_full_response(self) -> AsyncIterator[str]:
         """Stream a full response; caller must collect chunks and call
         add_assistant_message with the complete text afterward."""
-        stream = await asyncio.wait_for(
-            self.client.chat.completions.create(
-                model=self.model,
-                messages=self.messages,
-                stream=True,
-            ),
+        stream = await self._make_completion_call(
+            messages=self.messages,
             timeout=self.response_timeout,
+            stream=True,
         )
         async for chunk in stream:
             delta = chunk.choices[0].delta
@@ -167,7 +187,7 @@ class PoeClient:
             )
             return resp.choices[0].message.content or ""
         except Exception as exc:
-            return f"(Failed to generate summary: {exc!s})"
+            return f"（摘要產生失敗：{exc!s}）"
 
     async def close(self) -> None:
         await self._client.close()

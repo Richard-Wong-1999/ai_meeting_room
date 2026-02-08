@@ -7,6 +7,7 @@ from typing import Any
 from .models import AppConfig, ModeratorState, RelevanceResult
 from .notes import NotesManager
 from .poe_client import PoeClient
+from .utils import build_participant_labels, format_relevance_result, sort_speakers
 
 # Callback signatures (all are async)
 OnChatMessage = Callable[[str, str], Coroutine[Any, Any, None]]   # (author, text)
@@ -32,10 +33,7 @@ class Moderator:
         self._poe = poe
         self._notes = NotesManager(poe)
         self._shutdown = False
-        self._labels: dict[str, str] = {
-            p.name: f"{p.name}（{p.role}, {p.model}）"
-            for p in config.participants
-        }
+        self._labels: dict[str, str] = build_participant_labels(config.participants)
 
         self.on_chat_message = on_chat_message
         self.on_chat_chunk = on_chat_chunk
@@ -63,21 +61,15 @@ class Moderator:
         self._notes.add_message("User", text)
 
         # --- Phase 1: initial relevance check ---
-        await self.on_status(ModeratorState.CHECKING_RELEVANCE, "Asking all AIs…")
+        await self.on_status(ModeratorState.CHECKING_RELEVANCE, "正在詢問所有 AI…")
         results = await self._parallel_relevance_check("User", text)
         self._check_shutdown()
 
         # Log relevance results to notes panel
         for r in results:
-            tag = "YES" if r.wants_to_speak else "NO"
-            await self.on_note(
-                f"[{self._label(r.participant_name)}] {tag}: {r.summary}"
-            )
+            await self.on_note(format_relevance_result(r, self._label))
 
-        speakers = sorted(
-            [r for r in results if r.wants_to_speak],
-            key=lambda r: r.priority,
-        )
+        speakers = sort_speakers(results)
 
         if not speakers:
             await self.on_note("沒有 AI 想發言。正在產生摘要…")
@@ -102,7 +94,7 @@ class Moderator:
             session = self._poe.sessions[current.participant_name]
             await self.on_status(
                 ModeratorState.AI_SPEAKING,
-                f"{current.participant_name} is speaking…",
+                f"{current.participant_name} 發言中…",
             )
 
             # Stream the AI response
@@ -113,14 +105,14 @@ class Moderator:
                     full_text += chunk
                     await self.on_chat_chunk(current.participant_name, chunk)
             except asyncio.TimeoutError:
-                full_text += "\n(response timed out)"
+                full_text += "\n（回應逾時）"
                 await self.on_note(
                     f"[{self._label(current.participant_name)}] 回應逾時"
                 )
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                full_text += f"\n(error: {exc!s})"
+                full_text += f"\n（錯誤：{exc!s}）"
                 await self.on_note(
                     f"[{self._label(current.participant_name)}] 錯誤: {exc!s}"
                 )
@@ -149,7 +141,7 @@ class Moderator:
                 self._check_shutdown()
                 await self.on_status(
                     ModeratorState.RECHECKING_RELEVANCE,
-                    "Rechecking remaining AIs…",
+                    "正在重新檢查其餘 AI…",
                 )
                 recheck_results = await self._parallel_recheck(
                     remaining_names,
@@ -158,15 +150,11 @@ class Moderator:
                 )
 
                 for r in recheck_results:
-                    tag = "YES" if r.wants_to_speak else "NO"
                     await self.on_note(
-                        f"  ↳ [{self._label(r.participant_name)}] {tag}: {r.summary}"
+                        format_relevance_result(r, self._label, prefix="  ↳ ")
                     )
 
-                speakers = sorted(
-                    [r for r in recheck_results if r.wants_to_speak],
-                    key=lambda r: r.priority,
-                )
+                speakers = sort_speakers(recheck_results)
 
         # --- Phase 4: generate round summary ---
         await self._generate_round_summary()

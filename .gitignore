@@ -6,3 +6,8 @@ nul
 dist/
 build/
 .venv/
+
+# User configuration (should be in home directory, but just in case)
+preferences.yaml
+conversations/
+.ai_meeting_room/
